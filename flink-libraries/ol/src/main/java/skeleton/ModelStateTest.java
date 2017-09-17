@@ -22,7 +22,7 @@ import java.util.Collections;
 /**
  * Simple example to show the state is consistent between multiple instances of an operator.
  * The model is only an increasing counter.
- * The result shows increasing values without a duplication,
+ * Result shows increasing values without a duplication,
  * so the counter is increased by each instance.
  */
 public class ModelStateTest {

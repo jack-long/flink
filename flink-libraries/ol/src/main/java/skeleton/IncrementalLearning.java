@@ -24,14 +24,12 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.TimeCharacteristic;
+import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.co.CoFlatMapFunction;
-import org.apache.flink.streaming.api.functions.co.CoMapFunction;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.functions.windowing.RichAllWindowFunction;
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
 import org.apache.flink.util.Collector;
@@ -65,15 +63,14 @@ public class IncrementalLearning {
         // To simplify we make the assumption that the last element in each line is the dependent variable
         DataStream<ArrayList<Double>> trainingData = env.readTextFile(params.get("training"))
                 .map(new VectorExtractor());
-        // Build the model
 
-        DataStream<ArrayList<Double>> model = trainingData
+        // Build the model
+        DataStream<Tuple3<ArrayList<Double>, Double, Integer>> model = trainingData
                 .countWindowAll(Integer.parseInt(params.get("batchsize")))
                 .apply(new PartialModelBuilder(learningRate, Integer.parseInt(params.get("dimensions"))));
 
-        model.print();
-
-
+        // model.print();
+        model.writeAsText("output/incremental_learn", FileSystem.WriteMode.OVERWRITE);
         // execute program
         env.execute("Streaming SGD");
     }
@@ -86,9 +83,9 @@ public class IncrementalLearning {
     /**
      * Builds up-to-date partial models on new training data.
      */
-    public static class PartialModelBuilder extends RichAllWindowFunction<ArrayList<Double>, ArrayList<Double>, GlobalWindow> {
+    public static class PartialModelBuilder extends RichAllWindowFunction<ArrayList<Double>, Tuple3<ArrayList<Double>, Double, Integer>, GlobalWindow> {
 
-        public PartialModelBuilder(Double learningRate, int dimensions) {
+        PartialModelBuilder(Double learningRate, int dimensions) {
             this.learningRate = learningRate;
             this.dimensions = dimensions;
         }
@@ -129,18 +126,19 @@ public class IncrementalLearning {
 
         // This is where the model update happens. Our input is one batch of training points (as an Iterator)
         // and the output is the updated model (weight vector)
-        private ArrayList<Double> buildPartialModel(Iterable<ArrayList<Double>> trainingBatch) throws Exception{
+        private Tuple3<ArrayList<Double>, Double, Integer> buildPartialModel(Iterable<ArrayList<Double>> trainingBatch) throws Exception{
             int batchSize = 0;
             // Get the old model
             ArrayList<Double> regressionModel = modelState.value();
             ArrayList<Double> gradientSum = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
+            Double error = .0;
 
             for (ArrayList<Double> sample : trainingBatch) {
                 // For each example in the batch, find it's error derivative
                 batchSize++;
                 Double truth = sample.get(sample.size() - 1);
                 Double prediction = predict(regressionModel, sample);
-                Double error = squaredError(truth, prediction);
+                error += squaredError(truth, prediction);
                 Double derivative = prediction - truth;
                 for (int i = 0; i < regressionModel.size(); i++) {
                     // For each weight in our model use the example's error derivative to get the weight gradient
@@ -158,7 +156,8 @@ public class IncrementalLearning {
                 Double change = currentLR * (gradientSum.get(i) / batchSize);
                 regressionModel.set(i, oldWeight - change);
             }
-            return regressionModel;
+//            return regressionModel;
+            return new Tuple3<>(regressionModel, error / batchSize, applyCount);
         }
 
         private Double predict(ArrayList<Double> model, ArrayList<Double> sample){
@@ -172,12 +171,13 @@ public class IncrementalLearning {
 
         // The apply function calculates the updated model according to the new batch and updates the state
         @Override
-        public void apply(GlobalWindow window, Iterable<ArrayList<Double>> values, Collector<ArrayList<Double>> out) throws Exception {
+        public void apply(GlobalWindow window, Iterable<ArrayList<Double>> values, Collector<Tuple3<ArrayList<Double>, Double, Integer>> out) throws Exception {
             this.applyCount++;
 
-            ArrayList<Double> updatedModel = buildPartialModel(values);
+            Tuple3<ArrayList<Double>, Double, Integer> updateValues = buildPartialModel(values);
+            ArrayList<Double> updatedModel = updateValues.f0;
             modelState.update(updatedModel);
-            out.collect(updatedModel);
+            out.collect(updateValues);
         }
     }
 
@@ -187,8 +187,8 @@ public class IncrementalLearning {
         public ArrayList<Double> map(String s) throws Exception {
             String[] elements = s.split(",");
             ArrayList<Double> doubleElements = new ArrayList<>(elements.length);
-            for (int i = 0; i < elements.length; i++) {
-                doubleElements.add(new Double(elements[i]));
+            for (String element : elements) {
+                doubleElements.add(new Double(element));
             }
             return doubleElements;
         }

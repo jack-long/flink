@@ -12,6 +12,7 @@ import static org.apache.flink.core.fs.FileSystem.WriteMode.OVERWRITE;
 
 public class LinearRegressionWithIndexTest {
     public static void main(String[] args) throws Exception {
+        // handle input parameters
         ParameterTool params = ParameterTool.fromArgs(args);
         final String input = params.getRequired("input");
 
@@ -30,14 +31,10 @@ public class LinearRegressionWithIndexTest {
                 .map(new VectorExtractor());  // partitioned
 //        dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
-        /**
-         *
-         * Reference FlinkML & Spark MLlib
-         */
+        // Reference FlinkML & Spark MLlib
         LinearRegressionWithIndex lr = new LinearRegressionWithIndex();
-        /**
-         * The fit() method returns the Estimator, the model.
-         */
+
+        // The fit() method returns the Estimator, the model.
         DataStream<Tuple4<ArrayList<Double>, Double, Integer, Integer>> model = lr.fit(dataStream);
         model.writeAsText("output/output_drift_with_index", OVERWRITE); //.setParallelism(1);
 

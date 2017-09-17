@@ -39,6 +39,8 @@ import org.apache.flink.util.Collector;
 
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.flink.core.fs.FileSystem.WriteMode.OVERWRITE;
+
 public class TravelTimePrediction {
 
 	public static void main(String[] args) throws Exception {
@@ -72,7 +74,9 @@ public class TravelTimePrediction {
 			.flatMap(new PredictionModel());
 
 		// print the predictions
-		predictions.print();
+//		predictions.print();
+		// write predictions to file
+		predictions.writeAsText("output/travel_time_prediction", OVERWRITE);
 
 		// run the prediction pipeline
 		env.execute("Taxi Ride Prediction");
@@ -142,7 +146,7 @@ public class TravelTimePrediction {
 			ValueStateDescriptor<TravelTimePredictionModel> descriptor =
 					new ValueStateDescriptor<>(
 							// state name
-							"regressionModel",
+							"linearRegressionModel",
 							// type information of state
 							TypeInformation.of(new TypeHint<TravelTimePredictionModel>() {}),
 							// default value of state
