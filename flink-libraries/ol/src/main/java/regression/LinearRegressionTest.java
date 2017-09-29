@@ -4,6 +4,7 @@ import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -41,7 +42,7 @@ public class LinearRegressionTest {
         LinearRegression lr = new LinearRegression(2);
 
         // LinearRegression.fit(input) => Tuple2<input, model>
-        DataStream<Tuple2<ArrayList<Double>, Double>> inputWithModel = lr.fit(dataStream);
+        DataStream<Tuple3<ArrayList<Double>, ArrayList<Double>, Double>> inputWithModel = lr.fit(dataStream);
         inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);
 
         // LinearRegression.predict(Tuple2<input, model>) => prediction
