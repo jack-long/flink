@@ -26,17 +26,17 @@ public class LinearRegressionTest {
         // set up streaming execution environment
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // operate in Event-time
-//        env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+        // env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
 
         // create a checkpoint every 5 seconds
-//        env.enableCheckpointing(5000);
+        // env.enableCheckpointing(5000);
         // try to restart 60 times with 10 seconds delay (10 Minutes)
-//        env.setRestartStrategy(RestartStrategies.fixedDelayRestart(60, Time.of(10, TimeUnit.SECONDS)));
+        // env.setRestartStrategy(RestartStrategies.fixedDelayRestart(60, Time.of(10, TimeUnit.SECONDS)));
 
         // start the data generator
         DataStream<ArrayList<Double>> dataStream = env.readTextFile(input)
                 .map(new VectorExtractor());
-//        dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
+        // dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
         // Reference FlinkML & Spark MLlib
         LinearRegression lr = new LinearRegression(2);
@@ -46,14 +46,13 @@ public class LinearRegressionTest {
         inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);
 
         // LinearRegression.predict(Tuple2<input, model>) => prediction
-//        DataStream<Tuple2<Double, Double>> predictions = lr.predict(inputWithModel);
-//        predictions.writeAsText("output_prediction", OVERWRITE);
+        // DataStream<Tuple2<Double, Double>> predictions = lr.predict(inputWithModel);
+        // predictions.writeAsText("output_prediction", OVERWRITE);
 
         // Another approach.
         // DataStream<Double> predictions = lr.fitPredict(dataStream);
 
-
-//        predictions.print();
+        // predictions.print();
 
         // run the prediction pipeline
         env.execute("Linear predictor");
@@ -64,17 +63,17 @@ public class LinearRegressionTest {
      *
      * Transform labeled training data to < data, label >
      */
-//    public static class VectorExtractor implements MapFunction<String, Tuple2<ArrayList<Double>, Double>> {
-//        @Override
-//        public Tuple2<ArrayList<Double>, Double> map(String s) throws Exception {
-//            String[] elements = s.split(",");
-//            ArrayList<Double> doubleElements = new ArrayList<>(elements.length - 1);
-//            for (int i = 0; i < elements.length - 1; i++) {
-//                doubleElements.add(new Double(elements[i]));
-//            }
-//            return new Tuple2<>(doubleElements, new Double(elements[elements.length - 1])) ;
-//        }
-//    }
+    // public static class VectorExtractor implements MapFunction<String, Tuple2<ArrayList<Double>, Double>> {
+    //    @Override
+    //    public Tuple2<ArrayList<Double>, Double> map(String s) throws Exception {
+    //        String[] elements = s.split(",");
+    //        ArrayList<Double> doubleElements = new ArrayList<>(elements.length - 1);
+    //        for (int i = 0; i < elements.length - 1; i++) {
+    //            doubleElements.add(new Double(elements[i]));
+    //        }
+    //        return new Tuple2<>(doubleElements, new Double(elements[elements.length - 1])) ;
+    //    }
+    // }
 
     public static class VectorExtractor implements MapFunction<String, ArrayList<Double>> {
         @Override
