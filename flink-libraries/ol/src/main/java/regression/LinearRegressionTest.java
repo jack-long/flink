@@ -39,7 +39,7 @@ public class LinearRegressionTest {
         // dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
         // Reference FlinkML & Spark MLlib
-        LinearRegression lr = new LinearRegression(2);
+        LinearRegression lr = new LinearRegression(1);
 
         // LinearRegression.fit(input) => Tuple2<input, model>
         DataStream<Tuple3<ArrayList<Double>, ArrayList<Double>, Double>> inputWithModel = lr.fit(dataStream);

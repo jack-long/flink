@@ -1,5 +1,6 @@
 package regression;
 
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
@@ -13,8 +14,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
 import org.apache.flink.util.Collector;
 
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.*;
 
 /**
  * Usage
@@ -35,12 +35,13 @@ public class LinearRegression {
     private Double learningRate;
     private int dimensions;
     private int batchSize = 10;
+    private int partition = 4;
 
     private long sampleCount = 0;
 
     public LinearRegression(int dimensions){
         this.dimensions = dimensions;
-        this.learningRate = new Double(0.0002);
+        this.learningRate = new Double(0.0001);
     }
 
     public LinearRegression(int dimensions, Double learningRate){
@@ -57,10 +58,10 @@ public class LinearRegression {
      * @throws Exception
      */
     public DataStream<Tuple3<ArrayList<Double>, ArrayList<Double>, Double>> fit(DataStream<ArrayList<Double>> trainingData) throws Exception {
-        return trainingData.rebalance().map(new PartialModelBuilder(learningRate, dimensions, batchSize));
+        return trainingData.map(new AssignKey(partition)).keyBy(0).map(new PartialModelBuilder(learningRate, dimensions, batchSize));
     }
 
-//    @Override
+    // @Override
     public DataStream<Tuple2<Double, Double>> predict(DataStream<ArrayList<Double>> testingData,
                                                       DataStream<ArrayList<Double>> model)
             throws Exception {
@@ -116,7 +117,7 @@ public class LinearRegression {
         }
     }
 
-    public static class PartialModelBuilder extends RichMapFunction<ArrayList<Double>, Tuple3<ArrayList<Double>, ArrayList<Double>, Double>> {
+    public static class PartialModelBuilder extends RichMapFunction<Tuple2<Integer, ArrayList<Double>>, Tuple3<ArrayList<Double>, ArrayList<Double>, Double>> {
 
         private Double learningRate;
         private int dimensions;
@@ -139,7 +140,7 @@ public class LinearRegression {
         // Here we initialize our state by creating a model as a weight vector of zeros
         @Override
         public void open(Configuration config) {
-            // ArrayList<Double> allZeroes = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
+            ArrayList<Double> allZeroes = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
             // obtain key-value state for prediction model
             // TODO: Do random assignment of weights instead of all zeros?
             ValueStateDescriptor<Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer>> descriptor =
@@ -149,7 +150,7 @@ public class LinearRegression {
                             // type information of state
                             TypeInformation.of(new TypeHint<Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer>>() {}),
                             // default value of state
-                            new Tuple3<>());
+                            new Tuple3<>(allZeroes, new ArrayList<>(), 0));
             modelState = getRuntimeContext().getState(descriptor);
         }
 
@@ -170,6 +171,10 @@ public class LinearRegression {
             ArrayList<Double> regressionModel = storedData.f0;
             ArrayList<ArrayList<Double>> trainingBatch = storedData.f1;
             int count = storedData.f2;
+
+            // remove the key
+            int length = trainingData.size();
+            trainingData = new ArrayList<>(trainingData.subList(1, length));
 
             if(count < this.batchSize){
                 trainingBatch.add(trainingData);
@@ -214,9 +219,22 @@ public class LinearRegression {
 
         // The apply function calculates the updated model according to the new batch and updates the state
         @Override
-        public Tuple3<ArrayList<Double>, ArrayList<Double>, Double> map(ArrayList<Double> value) throws Exception {
-            Tuple2<ArrayList<Double>, Double> updateValues = buildPartialModel(value);
-            return new Tuple3<>(value, updateValues.f0, updateValues.f1);
+        public Tuple3<ArrayList<Double>, ArrayList<Double>, Double> map(Tuple2<Integer, ArrayList<Double>> value) throws Exception {
+            Tuple2<ArrayList<Double>, Double> updateValues = buildPartialModel(value.f1);
+            return new Tuple3<>(value.f1, updateValues.f0, updateValues.f1);
+        }
+    }
+
+    public static class AssignKey implements MapFunction<ArrayList<Double>, Tuple2<Integer, ArrayList<Double>>> {
+        int partition;
+
+        AssignKey(int partition){
+            this.partition = partition;
+        }
+
+        @Override
+        public Tuple2<Integer, ArrayList<Double>> map(ArrayList<Double> value) throws Exception{
+            return new Tuple2<>(new Random().nextInt(partition), value);
         }
     }
 }
