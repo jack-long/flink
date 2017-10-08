@@ -41,7 +41,7 @@ public class LinearRegression {
 
     public LinearRegression(int dimensions){
         this.dimensions = dimensions;
-        this.learningRate = new Double(0.0001);
+        this.learningRate = new Double(0.0002);
     }
 
     public LinearRegression(int dimensions, Double learningRate){
@@ -127,11 +127,12 @@ public class LinearRegression {
 
         private static final long serialVersionUID = 1L;
 
-        // This is where we store our persistent state, which is the model.
-        private transient ValueState<Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer>> modelState;
+        // This is where we store our persistent state
+        // the model, the mini-batch data, batchSize
+        private transient ValueState<Tuple2<ArrayList<Double>, ArrayList<ArrayList<Double>>>> modelState;
 
 
-        public PartialModelBuilder(Double learningRate, int dimensions, int batchSize) {
+        PartialModelBuilder(Double learningRate, int dimensions, int batchSize) {
             this.learningRate = learningRate;
             this.dimensions = dimensions;
             this.batchSize = batchSize;
@@ -143,14 +144,14 @@ public class LinearRegression {
             ArrayList<Double> allZeroes = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
             // obtain key-value state for prediction model
             // TODO: Do random assignment of weights instead of all zeros?
-            ValueStateDescriptor<Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer>> descriptor =
+            ValueStateDescriptor<Tuple2<ArrayList<Double>, ArrayList<ArrayList<Double>>>> descriptor =
                     new ValueStateDescriptor<>(
                             // state name
                             "modelState",
                             // type information of state
-                            TypeInformation.of(new TypeHint<Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer>>() {}),
+                            TypeInformation.of(new TypeHint<Tuple2<ArrayList<Double>, ArrayList<ArrayList<Double>>>>() {}),
                             // default value of state
-                            new Tuple3<>(allZeroes, new ArrayList<>(), 0));
+                            new Tuple2<>(allZeroes, new ArrayList<>()));
             modelState = getRuntimeContext().getState(descriptor);
         }
 
@@ -162,27 +163,26 @@ public class LinearRegression {
          * This is where the model update happens.
          *
          * It takes a batch of input data to update model.
-          */
+         */
         private Tuple2<ArrayList<Double>, Double> buildPartialModel(ArrayList<Double> trainingData) throws Exception{
             int batchSize = 0;
 
             // Get the old model
-            Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer> storedData = modelState.value();
+            Tuple2<ArrayList<Double>, ArrayList<ArrayList<Double>>> storedData = modelState.value();
             ArrayList<Double> regressionModel = storedData.f0;
             ArrayList<ArrayList<Double>> trainingBatch = storedData.f1;
-            int count = storedData.f2;
 
-            // remove the key
-            int length = trainingData.size();
-            trainingData = new ArrayList<>(trainingData.subList(1, length));
+            trainingBatch.add(trainingData);
 
-            if(count < this.batchSize){
-                trainingBatch.add(trainingData);
-                count ++;
-                Tuple3<ArrayList<Double>, ArrayList<ArrayList<Double>>, Integer> newData = new Tuple3<>(regressionModel, trainingBatch, count);
-                modelState.update(newData);
+            // If training data is not enough for updating model,
+            // just add into collection and return original model.
+            if(trainingBatch.size() < this.batchSize){
+                // add new data into collection
+                modelState.update(new Tuple2<>(regressionModel, trainingBatch));
+                // return model and it's precision(-1 if not updated)
                 return new Tuple2<>(regressionModel, new Double(-1));
             }
+
             ArrayList<Double> gradientSum = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
             Double error = .0;
 
@@ -201,11 +201,15 @@ public class LinearRegression {
             }
             for (int i = 0; i < regressionModel.size(); i++) {
                 Double oldWeight = regressionModel.get(i);
-//                Double currentLR = Math.sqrt(applyCount);
+                // Double currentLR = Math.sqrt(applyCount);
                 Double change = learningRate * (gradientSum.get(i) / batchSize);
                 regressionModel.set(i, oldWeight - change);
             }
-//            return regressionModel;
+
+            // update state
+            modelState.update(new Tuple2<>(regressionModel, new ArrayList<>()));
+
+            // return regressionModel;
             return new Tuple2<>(regressionModel, error / batchSize);
         }
 
