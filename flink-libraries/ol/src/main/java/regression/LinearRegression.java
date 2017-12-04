@@ -61,7 +61,7 @@ public class LinearRegression {
      * @return
      * @throws Exception
      */
-    public DataStream<Tuple3<List<Double>, List<Double>, Double>> fit(DataStream<List<Double>> trainingData) throws Exception {
+    public DataStream<Tuple3<RegressionData, List<Double>, Double>> fit(DataStream<RegressionData> trainingData) throws Exception {
         return trainingData.map(new AssignKey(partition)).keyBy(0).map(new PartialModelBuilder(learningRate, dimensions, batchSize));
     }
 
@@ -121,7 +121,7 @@ public class LinearRegression {
         }
     }
 
-    public static class PartialModelBuilder extends RichMapFunction<Tuple2<Integer, List<Double>>, Tuple3<List<Double>, List<Double>, Double>> {
+    public static class PartialModelBuilder extends RichMapFunction<Tuple2<Integer, RegressionData>, Tuple3<RegressionData, List<Double>, Double>> {
 
         private Double learningRate;
         private int dimensions;
@@ -136,7 +136,7 @@ public class LinearRegression {
         private transient ValueState<Tuple2<List<Double>, List<List<Double>>>> modelState;
 
 
-        PartialModelBuilder(Double learningRate, int dimensions, int batchSize) {
+        public PartialModelBuilder(Double learningRate, int dimensions, int batchSize) {
             this.learningRate = learningRate;
             this.dimensions = dimensions;
             this.batchSize = batchSize;
@@ -227,13 +227,15 @@ public class LinearRegression {
 
         // The apply function calculates the updated model according to the new batch and updates the state
         @Override
-        public Tuple3<List<Double>, List<Double>, Double> map(Tuple2<Integer, List<Double>> value) throws Exception {
-            Tuple2<List<Double>, Double> updateValues = buildPartialModel(value.f1);
+        public Tuple3<RegressionData, List<Double>, Double> map(Tuple2<Integer, RegressionData> value) throws Exception {
+            List<Double> trainingData = new ArrayList<>(value.f1.values);
+            trainingData.add(value.f1.label);
+            Tuple2<List<Double>, Double> updateValues = buildPartialModel(trainingData);
             return new Tuple3<>(value.f1, updateValues.f0, updateValues.f1);
         }
     }
 
-    public static class AssignKey implements MapFunction<List<Double>, Tuple2<Integer, List<Double>>> {
+    public static class AssignKey implements MapFunction<RegressionData, Tuple2<Integer, RegressionData>> {
         int partition;
 
         AssignKey(int partition){
@@ -241,7 +243,7 @@ public class LinearRegression {
         }
 
         @Override
-        public Tuple2<Integer, List<Double>> map(List<Double> value) throws Exception{
+        public Tuple2<Integer, RegressionData> map(RegressionData value) throws Exception{
             return new Tuple2<>(new Random().nextInt(partition), value);
         }
     }

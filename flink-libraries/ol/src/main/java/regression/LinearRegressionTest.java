@@ -17,6 +17,8 @@ import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
 import java.util.List;
 
 import static org.apache.flink.core.fs.FileSystem.WriteMode.OVERWRITE;
@@ -27,6 +29,8 @@ public class LinearRegressionTest {
         final String input = params.getRequired("input");
         final String output = params.getRequired("output");
 
+        final int dimension = params.getInt("dimention", 1);
+
         // set up streaming execution environment
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         // operate in Event-time
@@ -36,8 +40,8 @@ public class LinearRegressionTest {
         // DataStream<ArrayList<Double>> dataStream = env.readTextFile(input)
         //        .map(new VectorExtractor());
 
-        DataStream<List<Double>> dataStream = env.addSource(new streamFromFile(input))
-                .map(new VectorExtractor()); //.assignTimestampsAndWatermarks(new TimestampExtractor());
+        DataStream<RegressionData> dataStream = env.addSource(new streamFromFile(input))
+                .map(new PrepareData(dimension)); //.assignTimestampsAndWatermarks(new TimestampExtractor());
 
         // remove the original timestamp at the fist position.
         // DataStream<List<Double>> preparedDataStream = dataStream.map(new GetValues());
@@ -45,10 +49,10 @@ public class LinearRegressionTest {
         // dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
         // Reference FlinkML & Spark MLlib
-        LinearRegression lr = new LinearRegression(1);
+        LinearRegression lr = new LinearRegression(dimension);
 
         // LinearRegression.fit(input) => Tuple3<input, model, error_score>
-        DataStream<Tuple3<List<Double>, List<Double>, Double>> inputWithModel = lr.fit(dataStream);
+        DataStream<Tuple3<RegressionData, List<Double>, Double>> inputWithModel = lr.fit(dataStream);
 
         // write to file
         inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);
@@ -142,15 +146,34 @@ public class LinearRegressionTest {
         }
     }
 
-    public static class VectorExtractor implements MapFunction<String, List<Double>> {
+    public static class PrepareData implements MapFunction<String, RegressionData> {
+        static long id = 0;
+        int dimension;
+
+        PrepareData (int dimension){
+            this.dimension = dimension;
+        }
+
         @Override
-        public List<Double> map(String s) throws Exception {
+        public RegressionData map(String s) throws Exception {
+            Double timestamp;
+            List<Double> values = new ArrayList<>(dimension);
+            Double label;
+            int index = 0;
+
             String[] elements = s.split(",");
-            List<Double> doubleElements = new ArrayList<>(elements.length);
-            for (int i = 0; i < elements.length; i++) {
-                doubleElements.add(new Double(elements[i]));
+
+            id ++;
+            timestamp = new Double(id);
+            // timestamp = Calendar.getTime().getTime();
+
+            for (int i = 0; i < dimension; i++){
+                values.add(new Double(elements[index++]));
             }
-            return new ArrayList<>(doubleElements);
+
+            label = new Double(elements[index]);
+
+            return new RegressionData(id, values, label, timestamp);
         }
     }
 
