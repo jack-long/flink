@@ -52,7 +52,7 @@ public class LinearRegressionTest {
         LinearRegression lr = new LinearRegression(dimension);
 
         // LinearRegression.fit(input) => Tuple3<input, model, error_score>
-        DataStream<Tuple3<RegressionData, List<Double>, Double>> inputWithModel = lr.fit(dataStream);
+        DataStream<Tuple2<RegressionData, RegressionModel>> inputWithModel = lr.fit(dataStream);
 
         // write to file
         inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);

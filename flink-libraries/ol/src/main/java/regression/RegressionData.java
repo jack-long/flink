@@ -5,19 +5,19 @@ import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
 import java.util.List;
-import java.util.Locale;
 
 public class RegressionData {
-    private static transient DateTimeFormatter timeFormatter =
-            DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss").withLocale(Locale.US).withZoneUTC(); // TODO: is this necessary?
 
-    public List<Double> values; // TODO: how about array?
+    public List<Double> values;
     public Double timestamp;
     public Double label;
     /** useful for debug */
     public long id;
 
-    public RegressionData() {}; // TODO: consider the construction
+    /**
+     * Required no-arg constructor to be as POJO.
+     */
+    public RegressionData() {};
 
     public RegressionData(long id, List<Double> values, Double label, Double timestamp){
         this.id = id;
@@ -26,11 +26,11 @@ public class RegressionData {
         this.timestamp = timestamp;
     }
 
-    public int getDimention(){
+    public int getDimension(){
         return values.size();
     }
 
     public String toString(){
-        return "id: " + id + "; values: " + values + "; label: " + label + "; timestamp: " + timestamp;
+        return "id: " + id + ", values: " + values + ", label: " + label + ", timestamp: " + timestamp;
     }
 }
