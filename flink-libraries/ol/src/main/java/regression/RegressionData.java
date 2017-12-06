@@ -17,7 +17,15 @@ public class RegressionData {
     /**
      * Required no-arg constructor to be as POJO.
      */
-    public RegressionData() {};
+    public RegressionData() {}
+
+    public RegressionData(long id, List<Double> values){
+        this(id, values, null, null);
+    }
+
+    public RegressionData(long id, List<Double> values, Double label){
+        this(id, values, label, null);
+    }
 
     public RegressionData(long id, List<Double> values, Double label, Double timestamp){
         this.id = id;

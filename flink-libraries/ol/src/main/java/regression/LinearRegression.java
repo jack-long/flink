@@ -7,6 +7,7 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.ConnectedStreams;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -33,7 +34,7 @@ import java.util.*;
 public class LinearRegression {
     private Double learningRate;
     private int dimensions;
-    private int batchSize = 10;
+    private int batchSize;
     /**
      * Used to assign key to the values
      */
@@ -47,12 +48,13 @@ public class LinearRegression {
      * @param dimensions
      */
     public LinearRegression(int dimensions) {
-        this(dimensions, 0.0002);
+        this(dimensions, 0.0002, 10);
     }
 
-    public LinearRegression(int dimensions, Double learningRate) {
+    public LinearRegression(int dimensions, Double learningRate, int batchSize) {
         this.dimensions = dimensions;
         this.learningRate = learningRate;
+        this.batchSize = batchSize;
     }
 
     /**
@@ -67,7 +69,24 @@ public class LinearRegression {
         return trainingData.map(new AssignKey(partition)).keyBy(0).map(new PartialModelBuilder(learningRate, dimensions, batchSize));
     }
 
-    // @Override
+    /**
+     * Take a stream of input data, if label exist, update model, else predict.
+     *
+     * @param trainingData
+     * @return
+     * @throws Exception
+     */
+    public DataStream<Tuple3<RegressionData, RegressionModel, Double>> fitAndPredict(DataStream<RegressionData> trainingData) throws Exception {
+        return trainingData.map(new AssignKey(partition)).keyBy(0).map(new FitAndPredict(learningRate, dimensions, batchSize));
+    }
+
+    /**
+     * Just do prediction // TODO
+     * @param testingData
+     * @param model
+     * @return
+     * @throws Exception
+     */
     public DataStream<Tuple2<Double, Double>> predict(DataStream<ArrayList<Double>> testingData,
                                                       DataStream<ArrayList<Double>> model)
             throws Exception {
@@ -77,6 +96,17 @@ public class LinearRegression {
         return prediction;
     }
 
+    /**
+     * Save the model locally. // TODO
+     *
+     * Overwrite a local file when new model is produced.
+     *
+     * @param dataAndModel
+     * @param output
+     */
+    public void saveModel(DataStream<Tuple2<RegressionData, RegressionModel>> dataAndModel, String output){
+        dataAndModel.writeAsText(output);
+    }
 
     public static class PredictionModel extends RichCoFlatMapFunction<ArrayList<Double>, ArrayList<Double>, Tuple2<Double, Double>> {
         int dimensions;
@@ -170,7 +200,6 @@ public class LinearRegression {
          * It takes a batch of input data to update model.
          */
         private RegressionModel buildPartialModel(List<Double> trainingData) throws Exception {
-            int batchSize = 0;
 
             // Get the old model and stored samples
             Tuple2<RegressionModel, List<List<Double>>> storedData = modelState.value();
@@ -236,6 +265,132 @@ public class LinearRegression {
             RegressionModel newModel = buildPartialModel(trainingData);
             return new Tuple2<>(value.f1, newModel);
         }
+    }
+
+    public static class FitAndPredict extends RichMapFunction<Tuple2<Integer, RegressionData>,
+            Tuple3<RegressionData, RegressionModel, Double>> {
+
+        private Double learningRate;
+        private int dimensions;
+        private int batchSize;
+
+        private int applyCount = 0;
+
+        private static final long serialVersionUID = 1L;
+
+        /**
+         * The persistent state stores the model and the mini-batch data.
+         */
+        private transient ValueState<Tuple2<RegressionModel, List<List<Double>>>> modelState;
+
+
+        public FitAndPredict(Double learningRate, int dimensions, int batchSize) {
+            this.learningRate = learningRate;
+            this.dimensions = dimensions;
+            this.batchSize = batchSize;
+        }
+
+        /**
+         * Calculates the updated model according to the new batch and updates the state.
+         */
+        @Override
+        public Tuple3<RegressionData, RegressionModel, Double> map(Tuple2<Integer, RegressionData> value) throws Exception {
+            RegressionModel latestModel;
+
+            List<Double> sample = new ArrayList<>(value.f1.values); //TODO: necessary?
+
+            if(value.f1.label == null){
+                latestModel = modelState.value().f0;
+            } else {
+                sample.add(value.f1.label);
+                latestModel = buildPartialModel(sample);
+            }
+            Double prediction = predict(latestModel.weights, sample);
+            return new Tuple3<>(value.f1, latestModel, prediction);
+        }
+
+        @Override
+        public void open(Configuration config) {
+            RegressionModel initialModel = new RegressionModel(dimensions);
+            // obtain key-value state for prediction model
+            // TODO: Do random assignment of weights instead of all zeros?
+            ValueStateDescriptor<Tuple2<RegressionModel, List<List<Double>>>> descriptor =
+                    new ValueStateDescriptor<>(
+                            // state name
+                            "modelState",
+                            // type information of state
+                            TypeInformation.of(new TypeHint<Tuple2<RegressionModel, List<List<Double>>>>() {}),
+                            // default value of state
+                            new Tuple2<>(initialModel, new ArrayList<>()));
+            modelState = getRuntimeContext().getState(descriptor);
+        }
+
+        private Double squaredError(Double truth, Double prediction) {
+            return 0.5 * (prediction - truth) * (prediction - truth);
+        }
+
+        /**
+         * This is where the model update happens.
+         * It takes a batch of input data to update model. So if there is not enough samples, update will not happen.
+         * Label is assumed to be placed at the last position.
+         */
+        private RegressionModel buildPartialModel(List<Double> trainingData) throws Exception {
+
+            // Get the old model and stored samples
+            Tuple2<RegressionModel, List<List<Double>>> storedData = modelState.value();
+            RegressionModel currentModel = storedData.f0;
+            List<List<Double>> miniBatch = storedData.f1;
+
+            miniBatch.add(trainingData);
+
+            // If training data is not enough for updating model,
+            // just add new data into collection and return original model.
+            if (miniBatch.size() < batchSize) {
+                // add new data into collection
+                modelState.update(new Tuple2<>(currentModel, miniBatch));
+                return currentModel;
+            }
+
+            List<Double> gradientSum = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
+            Double error = .0;
+            List<Double> weights = currentModel.weights;
+
+            for (List<Double> sample : miniBatch) {
+                // For each example in the batch, find it's error derivative
+                batchSize++;
+                Double truth = sample.get(sample.size() - 1);
+                Double prediction = predict(weights, sample);
+                error += squaredError(truth, prediction);
+                Double derivative = prediction - truth;
+                for (int i = 0; i < weights.size(); i++) {
+                    Double weightGradient = derivative * sample.get(i);
+                    Double currentSum = gradientSum.get(i);
+                    gradientSum.set(i, currentSum + weightGradient);
+                }
+            }
+            for (int i = 0; i < weights.size(); i++) {
+                Double oldWeight = weights.get(i);
+                // Double currentLR = Math.sqrt(applyCount);
+                Double change = learningRate * (gradientSum.get(i) / batchSize);
+                weights.set(i, oldWeight - change);
+            }
+
+            RegressionModel newModel = new RegressionModel(weights, error / batchSize);
+            // update state
+            modelState.update(new Tuple2<>(newModel, new ArrayList<>()));
+
+            return newModel;
+        }
+
+        private Double predict(List<Double> weights, List<Double> sample) {
+            Double prediction = .0;
+            for (int i = 0; i < weights.size(); i++) {
+                prediction += weights.get(i) * sample.get(i);
+            }
+            return prediction;
+        }
+
+
     }
 
     public static class AssignKey implements MapFunction<RegressionData, Tuple2<Integer, RegressionData>> {

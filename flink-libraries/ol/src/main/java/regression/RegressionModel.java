@@ -20,8 +20,8 @@ public class RegressionModel {
      * @param dimensions
      */
     public RegressionModel(int dimensions) {
-        weights = new ArrayList<>(Collections.nCopies(dimensions, 0.0));
-        cost = new Double(-1); // TODO: what's the initial value ?
+        weights = new ArrayList<>(Collections.nCopies(dimensions, 0.0)); //TODO: better initial values?
+        cost = null;
     }
 
     public RegressionModel(List<Double> weights, Double cost) {

@@ -29,7 +29,7 @@ public class LinearRegressionTest {
         final String input = params.getRequired("input");
         final String output = params.getRequired("output");
 
-        final int dimension = params.getInt("dimention", 1);
+        final int dimension = params.getInt("dimension", 1);
 
         // set up streaming execution environment
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -49,10 +49,10 @@ public class LinearRegressionTest {
         // dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
         // Reference FlinkML & Spark MLlib
-        LinearRegression lr = new LinearRegression(dimension);
+        LinearRegression lr = new LinearRegression(dimension, 0.0004, 3);
 
         // LinearRegression.fit(input) => Tuple3<input, model, error_score>
-        DataStream<Tuple2<RegressionData, RegressionModel>> inputWithModel = lr.fit(dataStream);
+        DataStream<Tuple3<RegressionData, RegressionModel, Double>> inputWithModel = lr.fitAndPredict(dataStream);
 
         // write to file
         inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);
@@ -156,24 +156,25 @@ public class LinearRegressionTest {
 
         @Override
         public RegressionData map(String s) throws Exception {
-            Double timestamp;
             List<Double> values = new ArrayList<>(dimension);
             Double label;
             int index = 0;
 
             String[] elements = s.split(",");
 
-            id ++;
-            timestamp = new Double(id);
-            // timestamp = Calendar.getTime().getTime();
+            ++id;
 
             for (int i = 0; i < dimension; i++){
                 values.add(new Double(elements[index++]));
             }
 
-            label = new Double(elements[index]);
+            if(index == elements.length - 1) {
+                label = new Double(elements[index]);
+            } else {
+                label = null;
+            }
 
-            return new RegressionData(id, values, label, timestamp);
+            return new RegressionData(id, values, label);
         }
     }
 
