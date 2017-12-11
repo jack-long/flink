@@ -14,7 +14,13 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
 import org.apache.flink.util.Collector;
 
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Usage
@@ -35,6 +41,8 @@ public class LinearRegression {
     private Double learningRate;
     private int dimensions;
     private int batchSize;
+    private RegressionModel preTrainedModel = null;
+
     /**
      * Used to assign key to the values
      */
@@ -77,7 +85,7 @@ public class LinearRegression {
      * @throws Exception
      */
     public DataStream<Tuple3<RegressionData, RegressionModel, Double>> fitAndPredict(DataStream<RegressionData> trainingData) throws Exception {
-        return trainingData.map(new AssignKey(partition)).keyBy(0).map(new FitAndPredict(learningRate, dimensions, batchSize));
+        return trainingData.map(new AssignKey(partition)).keyBy(0).map(new FitAndPredict(learningRate, dimensions, batchSize, preTrainedModel));
     }
 
     /**
@@ -104,10 +112,62 @@ public class LinearRegression {
      * @param dataAndModel
      * @param output
      */
-    public void saveModel(DataStream<Tuple2<RegressionData, RegressionModel>> dataAndModel, String output){
+    public void outputModelToFile(DataStream<Tuple2<RegressionData, RegressionModel>> dataAndModel, String output){
         dataAndModel.writeAsText(output);
     }
 
+    /**
+     * Load the model saved by @{outputModelToFile} method.
+     *
+     * Take the last line of the file to find the model.
+     */
+    public void loadModelFromFile(String pathToFile){
+        String lastLine = null;
+
+        try (FileReader fr = new FileReader(pathToFile)) {
+            BufferedReader br = new BufferedReader(fr);
+            String tmp;
+            while((tmp = br.readLine()) != null){
+                lastLine = tmp;
+            }
+            preTrainedModel = parseString(lastLine);
+
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Extract model object from the last line of a file.
+     * @param line
+     * @return trained model
+     */
+    public RegressionModel parseString(String line){
+        if(line == null){
+            throw new IllegalArgumentException("Model not found!"); //TODO: improve error handling
+        }
+
+        Pattern modelPattern = Pattern.compile("weights: \\[(?<weights>.*?)\\], cost: (?<cost>.*?),");
+        Matcher matcher = modelPattern.matcher(line);
+        if (matcher.find()){
+            String weights = matcher.group("weights");
+            Double cost = new Double(matcher.group("cost"));
+
+            List<Double> doubles = new ArrayList<>();
+            for(String each : weights.split(",")){
+                doubles.add(new Double(each));
+            }
+            return new RegressionModel(doubles, cost);
+        } else {
+            throw new IllegalArgumentException("Model not found!"); //TODO: improve error handling
+        }
+    }
+
+    /**
+     * @deprecated this approach is not used.
+     */
     public static class PredictionModel extends RichCoFlatMapFunction<ArrayList<Double>, ArrayList<Double>, Tuple2<Double, Double>> {
         int dimensions;
 
@@ -153,13 +213,14 @@ public class LinearRegression {
         }
     }
 
+    /**
+     * @deprecated this approach is not used.
+     */
     public static class PartialModelBuilder extends RichMapFunction<Tuple2<Integer, RegressionData>, Tuple2<RegressionData, RegressionModel>> {
 
         private Double learningRate;
         private int dimensions;
         private int batchSize;
-
-        private int applyCount = 0;
 
         private static final long serialVersionUID = 1L;
 
@@ -267,14 +328,16 @@ public class LinearRegression {
         }
     }
 
+    /**
+     * The core of the approach.
+     */
     public static class FitAndPredict extends RichMapFunction<Tuple2<Integer, RegressionData>,
             Tuple3<RegressionData, RegressionModel, Double>> {
 
         private Double learningRate;
         private int dimensions;
         private int batchSize;
-
-        private int applyCount = 0;
+        private RegressionModel preTrainedModel = null;
 
         private static final long serialVersionUID = 1L;
 
@@ -284,10 +347,11 @@ public class LinearRegression {
         private transient ValueState<Tuple2<RegressionModel, List<List<Double>>>> modelState;
 
 
-        public FitAndPredict(Double learningRate, int dimensions, int batchSize) {
+        public FitAndPredict(Double learningRate, int dimensions, int batchSize, RegressionModel preTrainedModel) {
             this.learningRate = learningRate;
             this.dimensions = dimensions;
             this.batchSize = batchSize;
+            this.preTrainedModel = preTrainedModel;
         }
 
         /**
@@ -311,9 +375,14 @@ public class LinearRegression {
 
         @Override
         public void open(Configuration config) {
-            RegressionModel initialModel = new RegressionModel(dimensions);
+            RegressionModel initialModel;
+            if(preTrainedModel == null){
+                initialModel = new RegressionModel(dimensions);
+            } else {
+                initialModel = preTrainedModel;
+            }
+
             // obtain key-value state for prediction model
-            // TODO: Do random assignment of weights instead of all zeros?
             ValueStateDescriptor<Tuple2<RegressionModel, List<List<Double>>>> descriptor =
                     new ValueStateDescriptor<>(
                             // state name
@@ -393,6 +462,9 @@ public class LinearRegression {
 
     }
 
+    /**
+     * Manually assign a key to data for group operation.
+     */
     public static class AssignKey implements MapFunction<RegressionData, Tuple2<Integer, RegressionData>> {
         int partition;
 

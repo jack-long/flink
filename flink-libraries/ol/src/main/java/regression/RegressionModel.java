@@ -1,11 +1,12 @@
 package regression;
 
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class RegressionModel {
+public class RegressionModel implements Serializable {
     public List<Double> weights;
     public Double cost;
 

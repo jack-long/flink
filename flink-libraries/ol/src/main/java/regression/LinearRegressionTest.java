@@ -28,45 +28,30 @@ public class LinearRegressionTest {
         ParameterTool params = ParameterTool.fromArgs(args);
         final String input = params.getRequired("input");
         final String output = params.getRequired("output");
-
-        final int dimension = params.getInt("dimension", 1);
+        final int dimension = params.getInt("dimension");
+        final String modelFile = params.get("model", null);
 
         // set up streaming execution environment
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        // operate in Event-time
         // env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
 
-        // start the data generator
-        // DataStream<ArrayList<Double>> dataStream = env.readTextFile(input)
-        //        .map(new VectorExtractor());
-
-        DataStream<RegressionData> dataStream = env.addSource(new streamFromFile(input))
+        DataStream<RegressionData> dataStream = env.addSource(new streamFromFile(input)) //.readTextFile(input)
                 .map(new PrepareData(dimension)); //.assignTimestampsAndWatermarks(new TimestampExtractor());
-
-        // remove the original timestamp at the fist position.
-        // DataStream<List<Double>> preparedDataStream = dataStream.map(new GetValues());
-
-        // dataStream.writeAsText("output", OVERWRITE).setParallelism(1);
 
         // Reference FlinkML & Spark MLlib
         LinearRegression lr = new LinearRegression(dimension, 0.0004, 3);
 
-        // LinearRegression.fit(input) => Tuple3<input, model, error_score>
-        DataStream<Tuple3<RegressionData, RegressionModel, Double>> inputWithModel = lr.fitAndPredict(dataStream);
+        // Load trained model
+        if (modelFile != null) {
+            lr.loadModelFromFile(modelFile);
+        }
 
-        // write to file
-        inputWithModel.writeAsText(output, OVERWRITE); //.setParallelism(1);
-        // print
+        // Tuple3<input, model, prediction>
+        DataStream<Tuple3<RegressionData, RegressionModel, Double>> sampleModelPrediction = lr.fitAndPredict(dataStream);
+
+        sampleModelPrediction.writeAsText(output, OVERWRITE).setParallelism(1);
+
         // inputWithModel.print();
-
-        // LinearRegression.predict(Tuple2<input, model>) => prediction
-        // DataStream<Tuple2<Double, Double>> predictions = lr.predict(inputWithModel);
-        // predictions.writeAsText("output_prediction", OVERWRITE);
-
-        // Another approach.
-        // DataStream<Double> predictions = lr.fitPredict(dataStream);
-
-        // predictions.print();
 
         // run the prediction pipeline
         env.execute("Linear predictor");
@@ -122,7 +107,7 @@ public class LinearRegressionTest {
     }
 
     /**
-     * Assign tiemstamp and watermarks.
+     * Assign timestamp and watermarks.
      * <p>
      * Get timestamp at the first value.
      */
@@ -146,10 +131,20 @@ public class LinearRegressionTest {
         }
     }
 
+    /**
+     * Format the original data to feed LinearRegression.fitAndPredict().
+     *
+     * The input string can be labeled sample or unlabeled sample.
+     * The labed is assumed at the last position.
+     *
+     */
     public static class PrepareData implements MapFunction<String, RegressionData> {
-        static long id = 0;
+        static long id = 0;  //TODO duplicate value occurred in result
         int dimension;
 
+        /**
+         * @param dimension is used to determine the end of sample. (remainder is the label)
+         */
         PrepareData (int dimension){
             this.dimension = dimension;
         }
@@ -177,17 +172,4 @@ public class LinearRegressionTest {
             return new RegressionData(id, values, label);
         }
     }
-
-    /**
-     * Get the valid data values.
-     * <p>
-     * Remove original timestamples at the beginning of the List.
-     */
-    public static class GetValues implements MapFunction<List<Double>, List<Double>> {
-        @Override
-        public List<Double> map(List<Double> input) throws Exception {
-            return new ArrayList<>(input.subList(1, input.size()));
-        }
-    }
-
 }
